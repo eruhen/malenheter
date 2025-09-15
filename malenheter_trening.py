@@ -1,10 +1,10 @@
-
 # Målenheter – Streamlit øving (lengde/masse/volum)
-# Endringer:
-# - Kun Lengde aktiv som standard
-# - Fjernet dekameter (dam) og hektometer (hm)
-# - Lagt til hektogram (hg) i Masse
+# Endringer i denne versjonen:
+# - Fasitsvar vises ved feil (med korrekt enhet)
+# - Stabilt kategori-bytte: egen multiselect-state per kategori (unit_sel_<kategori>)
+# - Standard: kun Lengde aktiv, uten dam/hm; Masse har hg
 # Kjør: streamlit run malenheter_trening.py
+
 import random
 from datetime import datetime, timedelta
 import streamlit as st
@@ -13,7 +13,7 @@ from decimal import Decimal, getcontext
 
 getcontext().prec = 28
 
-# ---------------- Utilities ----------------
+# ---------- Utilities ----------
 def fmt(n: Decimal) -> str:
     """Format Decimal with comma as decimal separator, no trailing zeros."""
     if n == n.to_integral():
@@ -28,27 +28,24 @@ def parse_user(s: str) -> Decimal:
     return Decimal(s)
 
 def pow10(exp: int) -> Decimal:
-    if exp >= 0:
-        return Decimal(10) ** exp
-    else:
-        return Decimal(1) / (Decimal(10) ** (-exp))
+    return (Decimal(10) ** exp) if exp >= 0 else (Decimal(1) / (Decimal(10) ** (-exp)))
 
-# ---------------- Domain ----------------
+# ---------- Domain ----------
 UNITS = {
-    "Lengde": ["mm","cm","dm","m","km"],   # fjernet dam, hm
-    "Masse":  ["mg","g","hg","kg","tonn"],# la til hg
+    "Lengde": ["mm","cm","dm","m","km"],          # dam, hm fjernet
+    "Masse":  ["mg","g","hg","kg","tonn"],        # hg lagt til
     "Volum":  ["ml","cl","dl","l"]
 }
 
 EXPONENTS = {
     "Lengde": {"mm": -3, "cm": -2, "dm": -1, "m": 0, "km": 3},
-    "Masse":  {"mg": -3, "g": 0, "hg": 2, "kg": 3, "tonn": 6},  # hg = 10^2 g
+    "Masse":  {"mg": -3, "g": 0, "hg": 2, "kg": 3, "tonn": 6},
     "Volum":  {"ml": -3, "cl": -2, "dl": -1, "l": 0},
 }
 
 def random_value(difficulty: str) -> Decimal:
     if difficulty == "Hele tall":
-        n = Decimal(random.randint(1, 9999))
+        return Decimal(random.randint(1, 9999))
     elif difficulty == "Desimaltall":
         whole = random.randint(0, 999)
         frac_places = random.choice([1,2,3])
@@ -56,15 +53,12 @@ def random_value(difficulty: str) -> Decimal:
         n = Decimal(f"{whole}.{str(frac).zfill(frac_places)}")
         if random.random() < 0.2:
             n = Decimal(f"0.{str(random.randint(1,999)).zfill(random.choice([1,2,3]))}")
-    else:
-        if random.random() < 0.5:
-            return random_value("Hele tall")
-        else:
-            return random_value("Desimaltall")
-    return n
+        return n
+    else:  # Blandet
+        return random_value("Hele tall") if random.random() < 0.5 else random_value("Desimaltall")
 
 def build_conversion_task(category: str, allowed_units, difficulty: str):
-    units = [u for u in UNITS[category] if u in allowed_units] if allowed_units else UNITS[category]
+    units = [u for u in UNITS[category] if not allowed_units or u in allowed_units]
     if len(units) < 2:
         units = UNITS[category]
     u_from, u_to = random.sample(units, 2)
@@ -74,9 +68,10 @@ def build_conversion_task(category: str, allowed_units, difficulty: str):
     exp_diff = exp_to - exp_from  # multiply by 10^exp_diff
     correct = value * pow10(exp_diff)
     text = f"Konverter: {fmt(value)} {u_from} → {u_to} = ?"
-    return text, correct
+    # Returner også metadata for fasit
+    return text, correct, u_from, u_to, value
 
-# ---------------- State helpers ----------------
+# ---------- State helpers ----------
 def queue_new_task():
     st.session_state['spawn_new_task'] = True
 
@@ -115,34 +110,33 @@ def focus_answer_input():
         """, height=0
     )
 
-# ---------------- App ----------------
+# ---------- App ----------
 st.set_page_config(page_title="Målenheter – trening", page_icon="📏")
 st.title("Trening på målenheter (SI)")
 
-# Standard: kun Lengde aktiv i starten
 DEFAULT_CATEGORY = "Lengde"
 
 with st.sidebar:
     st.header("Innstillinger")
     st.session_state.mode = st.selectbox("Øktmodus", ["Antall oppgaver", "Tid"], index=0)
 
-    # Sett standard kategori første gang
     if "category" not in st.session_state:
         st.session_state.category = DEFAULT_CATEGORY
-    category = st.selectbox("Kategori", list(UNITS.keys()),
-                            index=list(UNITS.keys()).index(st.session_state.category))
+    # Velg kategori
+    category = st.selectbox(
+        "Kategori",
+        list(UNITS.keys()),
+        index=list(UNITS.keys()).index(st.session_state.category)
+    )
     st.session_state.category = category
 
-    # Unit filters per category (for Lengde som standard første gang)
+    # Enhetsvalg per kategori – EGEN key per kategori for å unngå konflikt ved bytte
     all_units = UNITS[category]
-    if "unit_sel" not in st.session_state or st.session_state.category == DEFAULT_CATEGORY and not st.session_state.get("unit_sel"):
-        default_units = UNITS[DEFAULT_CATEGORY]
-    else:
-        default_units = st.session_state.get("unit_sel", all_units)
-
-    # Viktig: skriv ikke til session_state manuelt – bruk key
-    st.multiselect("Tillatte enheter", all_units, default=default_units, key="unit_sel")
-    current_units = st.session_state.get("unit_sel", all_units) or all_units
+    units_key = f"unit_sel_{category}"
+    remembered = st.session_state.get(units_key, all_units)
+    safe_default = [u for u in remembered if u in all_units] or all_units
+    st.multiselect("Tillatte enheter", all_units, default=safe_default, key=units_key)
+    current_units = st.session_state.get(units_key, all_units) or all_units
 
     st.session_state.difficulty = st.selectbox("Talltype", ["Hele tall","Desimaltall","Blandet"], index=2, key="diff_sel")
 
@@ -161,6 +155,7 @@ with st.sidebar:
 # Init defaults
 for key, default in [
     ("task_text", None), ("correct", Decimal(0)), ("answer", ""),
+    ("from_unit", None), ("to_unit", None), ("start_value", None),
     ("finished", False), ("correct_count", 0), ("tried", 0),
     ("last_feedback", None), ("focus_answer", False),
     ("spawn_new_task", False), ("ignore_change", False)
@@ -168,28 +163,35 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Process queued new task BEFORE UI
+# Prosesser køet ny oppgave før UI
 if st.session_state.spawn_new_task:
-    text, correct = build_conversion_task(
+    text, correct, u_from, u_to, v = build_conversion_task(
         st.session_state.category,
         current_units,
         st.session_state.difficulty
     )
     st.session_state.task_text = text
     st.session_state.correct = correct
-    st.session_state['ignore_change'] = True  # suppress on_change once
+    st.session_state.from_unit = u_from
+    st.session_state.to_unit = u_to
+    st.session_state.start_value = v
+    st.session_state['ignore_change'] = True  # undertrykk on_change én gang
     st.session_state.answer = ""
     st.session_state.spawn_new_task = False
     st.session_state.focus_answer = True
 
+# Første oppgave hvis tomt
 if st.session_state.task_text is None:
-    text, correct = build_conversion_task(
+    text, correct, u_from, u_to, v = build_conversion_task(
         st.session_state.category,
         current_units,
         st.session_state.difficulty
     )
     st.session_state.task_text = text
     st.session_state.correct = correct
+    st.session_state.from_unit = u_from
+    st.session_state.to_unit = u_to
+    st.session_state.start_value = v
 
 # Header metrics
 col1, col2, col3 = st.columns(3)
@@ -208,7 +210,7 @@ with col3:
 
 st.divider()
 
-# End conditions
+# Sluttbetingelser
 if st.session_state.mode == "Tid":
     end_ts = st.session_state.get("end_time", None)
     if end_ts is not None and datetime.utcnow().timestamp() >= end_ts:
@@ -229,23 +231,26 @@ if st.session_state.get("finished", False) or (
     st.button("Start ny økt", type="primary", on_click=reset_session, use_container_width=True)
 
 else:
-    # Show last feedback
+    # Siste tilbakemelding
     if st.session_state.last_feedback == "correct":
         st.success("Riktig! ✅")
     elif st.session_state.last_feedback == "wrong":
-        st.error("Feil. Prøv igjen.")
+        # Vis fasit
+        st.error(
+            f"Feil. Riktig svar er **{fmt(st.session_state.correct)} {st.session_state.to_unit}**."
+        )
     elif st.session_state.last_feedback == "parse_error":
         st.warning("Kunne ikke tolke svaret. Bruk tall med komma eller punktum.")
 
-    # Big task text
+    # Oppgavetekst
     st.markdown(
         f"<div style='font-size:30px; font-weight:700; margin: 10px 0 20px 0;'>{st.session_state.task_text}</div>",
         unsafe_allow_html=True
     )
 
-    # Check/submit logic
+    # Sjekk/svar-logikken
     def submit_answer():
-        # Suppress on_change caused by programmatic clears
+        # Undertrykk on_change for programmatisk tømming
         if st.session_state.get('ignore_change', False):
             st.session_state['ignore_change'] = False
             return
@@ -268,6 +273,7 @@ else:
                     st.session_state.finished = True
             queue_new_task()
         else:
+            # Marker feil og vis fasit (over)
             st.session_state.last_feedback = "wrong"
             st.session_state.focus_answer = True
 
@@ -281,24 +287,9 @@ else:
         if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
             queue_new_task()
 
-# Focus back to input
+# Fokus tilbake til input
 if st.session_state.get("focus_answer", False):
-    components.html(
-        """
-        <script>
-        const tryFocus = () => {
-          const appRoot = window.parent.document.querySelector('section.main');
-          if (!appRoot) return;
-          const inputs = appRoot.querySelectorAll('input[type="text"]');
-          if (inputs.length > 0) {
-            inputs[0].focus();
-            inputs[0].select && inputs[0].select();
-          }
-        };
-        setTimeout(tryFocus, 50);
-        </script>
-        """, height=0
-    )
+    focus_answer_input()
     st.session_state["focus_answer"] = False
 
 st.caption("Skriv svaret i riktig enhet. Desimaltall kan skrives med komma eller punktum.")
