@@ -1,9 +1,9 @@
 
 # Målenheter – Streamlit øving (lengde/masse/volum)
 # Endringer i denne versjonen:
-# - FIKS: riktig konverteringsretning (bruker 10^(exp_from - exp_to))
-# - Tilbakemeldinger nevner ikke lenger å "skrive svaret i riktig enhet" (svaret er bare tallet)
-# - Fasiten ved feil viser kun tallet (ikke enhet)
+# - FIKS: "Sjekk svar"-knappen ignorerer ikke lenger første forsøk etter ny oppgave
+#   (egen knapp-handler som overstyrer ignore_change)
+# - Beholder tidligere fiks: korrekt konverteringsretning og fasit som tall
 # Kjør: streamlit run malenheter_trening.py
 
 import random
@@ -16,7 +16,6 @@ getcontext().prec = 28
 
 # ---------- Utilities ----------
 def fmt(n: Decimal) -> str:
-    """Format Decimal with comma as decimal separator, no trailing zeros."""
     if n == n.to_integral():
         s = str(int(n))
     else:
@@ -24,7 +23,6 @@ def fmt(n: Decimal) -> str:
     return s.replace('.', ',') if s else '0'
 
 def parse_user(s: str) -> Decimal:
-    """Parse user input that may use comma or dot as decimal separator."""
     s = s.strip().replace(' ', '').replace(',', '.')
     return Decimal(s)
 
@@ -33,8 +31,8 @@ def pow10(exp: int) -> Decimal:
 
 # ---------- Domain ----------
 UNITS = {
-    "Lengde": ["mm","cm","dm","m","km"],          # dam, hm fjernet
-    "Masse":  ["mg","g","hg","kg","tonn"],        # hg lagt til
+    "Lengde": ["mm","cm","dm","m","km"],
+    "Masse":  ["mg","g","hg","kg","tonn"],
     "Volum":  ["ml","cl","dl","l"]
 }
 
@@ -55,7 +53,7 @@ def random_value(difficulty: str) -> Decimal:
         if random.random() < 0.2:
             n = Decimal(f"0.{str(random.randint(1,999)).zfill(random.choice([1,2,3]))}")
         return n
-    else:  # Blandet
+    else:
         return random_value("Hele tall") if random.random() < 0.5 else random_value("Desimaltall")
 
 def build_conversion_task(category: str, allowed_units, difficulty: str):
@@ -66,7 +64,7 @@ def build_conversion_task(category: str, allowed_units, difficulty: str):
     value = random_value(difficulty)
     exp_from = EXPONENTS[category][u_from]
     exp_to = EXPONENTS[category][u_to]
-    # FIKS: riktig retning — multipliser med 10^(exp_from - exp_to)
+    # Riktig retning: fra -> til = * 10^(exp_from - exp_to)
     exp_diff = exp_from - exp_to
     correct = value * pow10(exp_diff)
     text = f"Konverter: {fmt(value)} {u_from} → {u_to} = ?"
@@ -162,7 +160,7 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Process queued new task BEFORE UI
+# Queue processing BEFORE UI
 if st.session_state.spawn_new_task:
     text, correct, u_from, u_to, v = build_conversion_task(
         st.session_state.category,
@@ -174,7 +172,7 @@ if st.session_state.spawn_new_task:
     st.session_state.from_unit = u_from
     st.session_state.to_unit = u_to
     st.session_state.start_value = v
-    st.session_state['ignore_change'] = True
+    st.session_state['ignore_change'] = True  # suppress first on_change after clearing
     st.session_state.answer = ""
     st.session_state.spawn_new_task = False
     st.session_state.focus_answer = True
@@ -230,7 +228,7 @@ if st.session_state.get("finished", False) or (
     st.button("Start ny økt", type="primary", on_click=reset_session, use_container_width=True)
 
 else:
-    # Last feedback
+    # Feedback
     if st.session_state.last_feedback == "correct":
         st.success("Riktig! ✅")
     elif st.session_state.last_feedback == "wrong":
@@ -244,12 +242,8 @@ else:
         unsafe_allow_html=True
     )
 
-    # Check/submit logic
-    def submit_answer():
-        if st.session_state.get('ignore_change', False):
-            st.session_state['ignore_change'] = False
-            return
-
+    # --- Shared evaluation logic (no ignore guard here) ---
+    def _evaluate_current_answer():
         s = st.session_state.get('answer', '')
         try:
             u = parse_user(s)
@@ -271,12 +265,23 @@ else:
             st.session_state.last_feedback = "wrong"
             st.session_state.focus_answer = True
 
-    st.text_input("Svar (skriv bare tallet):", key="answer", on_change=submit_answer)
+    # on_change handler for the input (with ignore guard)
+    def on_answer_change():
+        if st.session_state.get('ignore_change', False):
+            st.session_state['ignore_change'] = False
+            return
+        _evaluate_current_answer()
+
+    st.text_input("Svar (skriv bare tallet):", key="answer", on_change=on_answer_change)
 
     colA, colB = st.columns([1,1])
     with colA:
+        # Button handler must bypass ignore guard to avoid "no-op" etter ny oppgave
+        def on_check_button():
+            st.session_state['ignore_change'] = False
+            _evaluate_current_answer()
         if st.button("Sjekk svar", type="primary", use_container_width=True, key="check_btn"):
-            submit_answer()
+            on_check_button()
     with colB:
         if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
             queue_new_task()
