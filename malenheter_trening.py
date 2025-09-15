@@ -1,7 +1,9 @@
 
 # Målenheter – Streamlit øving (lengde/masse/volum)
-# Stabil Enter (form-submit), riktig konverteringsretning, fasit som tall,
-# og robust bytte av kategori/enheter. Standard: kun Lengde aktiv.
+# Endringer i denne versjonen:
+# - FIKS: Bruker verdien som KOMMER FRA FORMEN direkte (lokal variabel), ikke session_state,
+#   slik at første Enter/klikk evaluerer umiddelbart (ingen "kunne ikke tolke"-varsel).
+# - Beholder: riktig konverteringsretning, fasit som tall, stabilt kategori/bytte og standard Lengde.
 # Kjør: streamlit run malenheter_trening.py
 
 import random
@@ -21,7 +23,7 @@ def fmt(n: Decimal) -> str:
     return s.replace('.', ',') if s else '0'
 
 def parse_user(s: str) -> Decimal:
-    s = s.strip().replace(' ', '').replace(',', '.')
+    s = (s or "").strip().replace(' ', '').replace(',', '.')
     return Decimal(s)
 
 def pow10(exp: int) -> Decimal:
@@ -148,7 +150,7 @@ with st.sidebar:
 
 # Init defaults
 for key, default in [
-    ("task_text", None), ("correct", Decimal(0)), ("answer", ""),
+    ("task_text", None), ("correct", Decimal(0)),
     ("from_unit", None), ("to_unit", None), ("start_value", None),
     ("finished", False), ("correct_count", 0), ("tried", 0),
     ("last_feedback", None), ("focus_answer", False),
@@ -169,7 +171,6 @@ if st.session_state.spawn_new_task:
     st.session_state.from_unit = u_from
     st.session_state.to_unit = u_to
     st.session_state.start_value = v
-    st.session_state.answer = ""  # clear field for next question
     st.session_state.spawn_new_task = False
     st.session_state.focus_answer = True
 
@@ -238,15 +239,15 @@ else:
         unsafe_allow_html=True
     )
 
-    # --- Form for reliable Enter submit ---
+    # --- Form: vi bruker verdien DIREKTE fra text_input (lokal variabel) ---
     with st.form("answer_form", clear_on_submit=False):
-        st.text_input("Svar (skriv bare tallet):", key="answer")
+        ans = st.text_input("Svar (skriv bare tallet):", value="", key=None, placeholder="Skriv svaret her")
         submitted = st.form_submit_button("Sjekk svar", use_container_width=True)
 
-    def evaluate_current_answer():
-        s = st.session_state.get('answer', '')
+    def evaluate_value(val_str: str):
+        val_str = val_str if val_str is not None else ""
         try:
-            u = parse_user(s)
+            u = parse_user(val_str)
         except Exception:
             st.session_state.last_feedback = "parse_error"
             st.session_state.focus_answer = True
@@ -266,13 +267,13 @@ else:
             st.session_state.focus_answer = True
 
     if submitted:
-        evaluate_current_answer()
+        evaluate_value(ans)
 
-    # Optional "Ny oppgave"-knapp
+    # Ny oppgave-knapp
     if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
         queue_new_task()
 
-# Focus back to input
+# Fokus på input etter behov
 if st.session_state.get("focus_answer", False):
     focus_answer_input()
     st.session_state["focus_answer"] = False
