@@ -1,10 +1,9 @@
 
-# Målenheter – Streamlit øving (forenklet diagnoseversjon)
-# Krav fra lærer:
-# - Kun lengde (mm, cm, dm, m, km)
-# - All valgfrihet fjernet (ingen tid, ingen antallvalg, ingen kategorivalg, ingen talltypevalg)
-# - Fast økt: 10 oppgaver per økt
-# - Enter i input skal sjekke svaret (JS klikker "Sjekk svar")
+# Målenheter – Streamlit øving (forenklet diagnoseversjon) – FIX
+# Endringer:
+# - Bruker ÉN widget-state: key="answer_input" på text_input
+# - Leser alltid verdien fra st.session_state['answer_input'] ved evaluering
+# - Ingen manuell setting av answer_input fra return-verdien (unngår racing)
 #
 # Kjør: streamlit run malenheter_trening_simple.py
 
@@ -17,7 +16,6 @@ getcontext().prec = 28
 
 # ---------- Utilities ----------
 def fmt(n: Decimal) -> str:
-    """Format Decimal with comma as decimal separator, no trailing zeros."""
     if n == n.to_integral():
         s = str(int(n))
     else:
@@ -25,7 +23,6 @@ def fmt(n: Decimal) -> str:
     return s.replace('.', ',') if s else '0'
 
 def parse_user(s: str) -> Decimal:
-    """Parse user input that may use comma or dot as decimal separator."""
     s = (s or "").strip().replace(' ', '').replace(',', '.')
     if s == "":
         raise ValueError("empty")
@@ -39,10 +36,8 @@ UNITS = ["mm","cm","dm","m","km"]
 EXP = {"mm": -3, "cm": -2, "dm": -1, "m": 0, "km": 3}
 
 def random_value() -> Decimal:
-    """Blandet: hele tall eller desimaltall (inkludert < 1 noen ganger)."""
     if random.random() < 0.5:
         return Decimal(random.randint(1, 9999))
-    # desimaltall
     whole = random.randint(0, 999)
     frac_places = random.choice([1,2,3])
     frac = random.randint(1, 9*(10**(frac_places-1)))
@@ -58,17 +53,18 @@ def new_task():
     correct = value * pow10(exp_diff)
     st.session_state.task_text = f"Konverter: {fmt(value)} {u_from} → {u_to} = ?"
     st.session_state.correct = correct
-    st.session_state.answer_input = ""  # blank input for ny oppgave
     st.session_state.last_feedback = None
+    # Tøm input FØR neste visning
+    st.session_state['answer_input'] = ""
 
 def reset_session():
-    st.session_state.total = 10  # fast antall
+    st.session_state.total = 10
     st.session_state.remaining = st.session_state.total
     st.session_state.tried = 0
     st.session_state.correct_count = 0
     st.session_state.finished = False
-    st.session_state.answer_input = ""
     st.session_state.last_feedback = None
+    st.session_state['answer_input'] = ""
     new_task()
 
 # ---------- App ----------
@@ -123,12 +119,8 @@ else:
         unsafe_allow_html=True
     )
 
-    # Input (ingen on_change/form; Enter fanges av JS under og trykker 'Sjekk svar')
-    st.session_state.answer_input = st.text_input(
-        "Svar (skriv bare tallet):",
-        value=st.session_state.get("answer_input",""),
-        key="answer_input_text"
-    )
+    # Input – ÉN sann kilde: key="answer_input"
+    st.text_input("Svar (skriv bare tallet):", key="answer_input")
 
     # Evalueringsfunksjon
     def evaluate():
@@ -167,7 +159,12 @@ else:
         (function() {
           const root = window.parent.document;
           function bind() {
-            const input = root.querySelector('input[type="text"]');
+            // Finn input via label-tekst
+            const labels = [...root.querySelectorAll('label')];
+            const lab = labels.find(l => l.textContent.trim().startsWith('Svar (skriv bare tallet)'));
+            if (!lab) { setTimeout(bind, 120); return; }
+            // Input er neste/relatert element
+            const input = lab.parentElement.querySelector('input[type="text"]') || root.querySelector('input[type="text"]');
             const buttons = [...root.querySelectorAll('button')];
             const checkBtn = buttons.find(b => b.innerText.trim() === "Sjekk svar");
             if (!input || !checkBtn) { setTimeout(bind, 120); return; }
