@@ -1,9 +1,9 @@
 
 # Målenheter – Streamlit øving (lengde/masse/volum)
-# Endringer i denne versjonen:
-# - FIKS: Form leser SVARET fra session_state['answer_input'] (stabilt ved første Enter)
-# - Tømmer answer_input når ny oppgave lages (ingen on_change brukt, så trygt)
-# - Riktig konverteringsretning, fasit som tall, stabil kategori/bytte, standard Lengde
+# Versjon: "on-change JS" – Enter trigger knapp (ikke form, ikke on_change på text_input)
+# - Enter i input => JS klikker på "Sjekk svar"-knappen
+# - Ingen programmatisk on_change, så ingen "første Enter" bug
+# - Riktig konverteringsretning, fasit som tall, stabilt kategori/bytte, standard Lengde
 # Kjør: streamlit run malenheter_trening.py
 
 import random
@@ -97,22 +97,21 @@ def focus_answer_input():
         """
         <script>
         const tryFocus = () => {
-          const appRoot = window.parent.document.querySelector('section.main');
-          if (!appRoot) return;
-          const inputs = appRoot.querySelectorAll('input[type="text"]');
-          if (inputs.length > 0) {
-            inputs[0].focus();
-            inputs[0].select && inputs[0].select();
+          const root = window.parent.document;
+          const input = root.querySelector('input[type="text"]');
+          if (input) {
+            input.focus();
+            input.select && input.select();
           }
         };
-        setTimeout(tryFocus, 50);
+        setTimeout(tryFocus, 80);
         </script>
         """, height=0
     )
 
 # ---------- App ----------
 st.set_page_config(page_title="Målenheter – trening", page_icon="📏")
-st.title("Trening på målenheter (SI)")
+st.title("Trening på målenheter (SI) · Enter-flyt")
 
 DEFAULT_CATEGORY = "Lengde"
 
@@ -156,7 +155,7 @@ for key, default in [
     ("from_unit", None), ("to_unit", None), ("start_value", None),
     ("finished", False), ("correct_count", 0), ("tried", 0),
     ("last_feedback", None), ("focus_answer", False),
-    ("spawn_new_task", False)
+    ("spawn_new_task", False), ("answer_input", "")
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -174,7 +173,7 @@ if st.session_state.spawn_new_task:
     st.session_state.to_unit = u_to
     st.session_state.start_value = v
     st.session_state.spawn_new_task = False
-    # Tøm input trygt (ingen on_change i bruk)
+    # Trygt å tømme input her (vi bruker ikke on_change)
     st.session_state['answer_input'] = ""
     st.session_state.focus_answer = True
 
@@ -244,11 +243,14 @@ else:
         unsafe_allow_html=True
     )
 
-    # --- Form: bruk en nøkkel, les fra session_state ETTER submit ---
-    with st.form("answer_form", clear_on_submit=False):
-        st.text_input("Svar (skriv bare tallet):", key="answer_input", placeholder="Skriv svaret her")
-        submitted = st.form_submit_button("Sjekk svar", use_container_width=True)
+    # Input (uten on_change / form)
+    st.session_state['answer_input'] = st.text_input(
+        "Svar (skriv bare tallet):",
+        value=st.session_state.get('answer_input', ""),
+        key="answer_input_text"
+    )
 
+    # Evalueringsfunksjon
     def evaluate_current_answer():
         val_str = st.session_state.get('answer_input', '')
         try:
@@ -271,12 +273,38 @@ else:
             st.session_state.last_feedback = "wrong"
             st.session_state.focus_answer = True
 
-    if submitted:
-        evaluate_current_answer()
+    # Knapper
+    colA, colB = st.columns([1,1])
+    with colA:
+        if st.button("Sjekk svar", type="primary", use_container_width=True, key="check_btn"):
+            evaluate_current_answer()
+    with colB:
+        if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
+            queue_new_task()
 
-    # Ny oppgave-knapp
-    if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
-        queue_new_task()
+    # JS: Enter i input klikker på "Sjekk svar"
+    components.html(
+        """
+        <script>
+        (function() {
+          const root = window.parent.document;
+          function bind() {
+            const input = root.querySelector('input[type="text"]');
+            const buttons = [...root.querySelectorAll('button')];
+            const checkBtn = buttons.find(b => b.innerText.trim() === "Sjekk svar");
+            if (!input || !checkBtn) { setTimeout(bind, 120); return; }
+            input.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                checkBtn.click();
+              }
+            }, { once: false });
+          }
+          setTimeout(bind, 200);
+        })();
+        </script>
+        """, height=0
+    )
 
 # Fokus på input etter behov
 if st.session_state.get("focus_answer", False):
