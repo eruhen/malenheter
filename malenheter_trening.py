@@ -1,8 +1,9 @@
+
 # Målenheter – Streamlit øving (lengde/masse/volum)
 # Endringer i denne versjonen:
-# - Fasitsvar vises ved feil (med korrekt enhet)
-# - Stabilt kategori-bytte: egen multiselect-state per kategori (unit_sel_<kategori>)
-# - Standard: kun Lengde aktiv, uten dam/hm; Masse har hg
+# - FIKS: riktig konverteringsretning (bruker 10^(exp_from - exp_to))
+# - Tilbakemeldinger nevner ikke lenger å "skrive svaret i riktig enhet" (svaret er bare tallet)
+# - Fasiten ved feil viser kun tallet (ikke enhet)
 # Kjør: streamlit run malenheter_trening.py
 
 import random
@@ -65,10 +66,10 @@ def build_conversion_task(category: str, allowed_units, difficulty: str):
     value = random_value(difficulty)
     exp_from = EXPONENTS[category][u_from]
     exp_to = EXPONENTS[category][u_to]
-    exp_diff = exp_to - exp_from  # multiply by 10^exp_diff
+    # FIKS: riktig retning — multipliser med 10^(exp_from - exp_to)
+    exp_diff = exp_from - exp_to
     correct = value * pow10(exp_diff)
     text = f"Konverter: {fmt(value)} {u_from} → {u_to} = ?"
-    # Returner også metadata for fasit
     return text, correct, u_from, u_to, value
 
 # ---------- State helpers ----------
@@ -122,7 +123,6 @@ with st.sidebar:
 
     if "category" not in st.session_state:
         st.session_state.category = DEFAULT_CATEGORY
-    # Velg kategori
     category = st.selectbox(
         "Kategori",
         list(UNITS.keys()),
@@ -130,7 +130,6 @@ with st.sidebar:
     )
     st.session_state.category = category
 
-    # Enhetsvalg per kategori – EGEN key per kategori for å unngå konflikt ved bytte
     all_units = UNITS[category]
     units_key = f"unit_sel_{category}"
     remembered = st.session_state.get(units_key, all_units)
@@ -163,7 +162,7 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Prosesser køet ny oppgave før UI
+# Process queued new task BEFORE UI
 if st.session_state.spawn_new_task:
     text, correct, u_from, u_to, v = build_conversion_task(
         st.session_state.category,
@@ -175,12 +174,12 @@ if st.session_state.spawn_new_task:
     st.session_state.from_unit = u_from
     st.session_state.to_unit = u_to
     st.session_state.start_value = v
-    st.session_state['ignore_change'] = True  # undertrykk on_change én gang
+    st.session_state['ignore_change'] = True
     st.session_state.answer = ""
     st.session_state.spawn_new_task = False
     st.session_state.focus_answer = True
 
-# Første oppgave hvis tomt
+# First task
 if st.session_state.task_text is None:
     text, correct, u_from, u_to, v = build_conversion_task(
         st.session_state.category,
@@ -210,7 +209,7 @@ with col3:
 
 st.divider()
 
-# Sluttbetingelser
+# End conditions
 if st.session_state.mode == "Tid":
     end_ts = st.session_state.get("end_time", None)
     if end_ts is not None and datetime.utcnow().timestamp() >= end_ts:
@@ -231,26 +230,22 @@ if st.session_state.get("finished", False) or (
     st.button("Start ny økt", type="primary", on_click=reset_session, use_container_width=True)
 
 else:
-    # Siste tilbakemelding
+    # Last feedback
     if st.session_state.last_feedback == "correct":
         st.success("Riktig! ✅")
     elif st.session_state.last_feedback == "wrong":
-        # Vis fasit
-        st.error(
-            f"Feil. Riktig svar er **{fmt(st.session_state.correct)} {st.session_state.to_unit}**."
-        )
+        st.error(f"Feil. Riktig svar er **{fmt(st.session_state.correct)}**.")
     elif st.session_state.last_feedback == "parse_error":
-        st.warning("Kunne ikke tolke svaret. Bruk tall med komma eller punktum.")
+        st.warning("Kunne ikke tolke tallet. Bruk komma eller punktum.")
 
-    # Oppgavetekst
+    # Task text
     st.markdown(
         f"<div style='font-size:30px; font-weight:700; margin: 10px 0 20px 0;'>{st.session_state.task_text}</div>",
         unsafe_allow_html=True
     )
 
-    # Sjekk/svar-logikken
+    # Check/submit logic
     def submit_answer():
-        # Undertrykk on_change for programmatisk tømming
         if st.session_state.get('ignore_change', False):
             st.session_state['ignore_change'] = False
             return
@@ -273,11 +268,10 @@ else:
                     st.session_state.finished = True
             queue_new_task()
         else:
-            # Marker feil og vis fasit (over)
             st.session_state.last_feedback = "wrong"
             st.session_state.focus_answer = True
 
-    st.text_input("Svar (bruk komma eller punktum):", key="answer", on_change=submit_answer)
+    st.text_input("Svar (skriv bare tallet):", key="answer", on_change=submit_answer)
 
     colA, colB = st.columns([1,1])
     with colA:
@@ -287,9 +281,9 @@ else:
         if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
             queue_new_task()
 
-# Fokus tilbake til input
+# Focus back to input
 if st.session_state.get("focus_answer", False):
     focus_answer_input()
     st.session_state["focus_answer"] = False
 
-st.caption("Skriv svaret i riktig enhet. Desimaltall kan skrives med komma eller punktum.")
+st.caption("Skriv bare tallet. Du kan bruke komma eller punktum som desimaltegn.")
