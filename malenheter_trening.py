@@ -1,5 +1,5 @@
 
-# Målenheter – Streamlit øving (lengde/masse/volum)
+# Måleenheter – Streamlit øving (lengde/masse/volum) — FIX: unngå å sette widget-key i samme kjøring
 # Kjør: streamlit run malenheter_trening.py
 import random
 from datetime import datetime, timedelta
@@ -27,7 +27,6 @@ def pow10(exp: int) -> Decimal:
     if exp >= 0:
         return Decimal(10) ** exp
     else:
-        # negative exponent
         return Decimal(1) / (Decimal(10) ** (-exp))
 
 # ---------------- Domain ----------------
@@ -37,7 +36,6 @@ UNITS = {
     "Volum":  ["ml","cl","dl","l"]
 }
 
-# exponents relative to a base unit for each category (SI-ish progression)
 EXPONENTS = {
     "Lengde": {"mm": -3, "cm": -2, "dm": -1, "m": 0, "dam": 1, "hm": 2, "km": 3},
     "Masse":  {"mg": -3, "g": 0, "kg": 3, "tonn": 6},
@@ -45,7 +43,6 @@ EXPONENTS = {
 }
 
 def random_value(difficulty: str) -> Decimal:
-    """Generate a random starting value, with option for integers/decimals/blended."""
     if difficulty == "Hele tall":
         n = Decimal(random.randint(1, 9999))
     elif difficulty == "Desimaltall":
@@ -54,18 +51,15 @@ def random_value(difficulty: str) -> Decimal:
         frac = random.randint(1, 9*(10**(frac_places-1)))
         n = Decimal(f"{whole}.{str(frac).zfill(frac_places)}")
         if random.random() < 0.2:
-            # sometimes less than 1
             n = Decimal(f"0.{str(random.randint(1,999)).zfill(random.choice([1,2,3]))}")
     else:
-        # Blandet
         if random.random() < 0.5:
             return random_value("Hele tall")
         else:
             return random_value("Desimaltall")
     return n
 
-def build_conversion_task(category: str, allowed_units: list[str], difficulty: str):
-    """Build a single conversion task within a category and allowed units."""
+def build_conversion_task(category: str, allowed_units, difficulty: str):
     units = [u for u in UNITS[category] if u in allowed_units] if allowed_units else UNITS[category]
     if len(units) < 2:
         units = UNITS[category]
@@ -125,11 +119,12 @@ with st.sidebar:
     st.header("Innstillinger")
     st.session_state.mode = st.selectbox("Øktmodus", ["Antall oppgaver", "Tid"], index=0)
     category = st.selectbox("Kategori", list(UNITS.keys()), index=0)
-    # Unit filters per category
+
+    # Unit filters per category (IKKE sett st.session_state['unit_sel'] eksplisitt her)
     all_units = UNITS[category]
-    default_units = all_units  # preselect all
+    default_units = st.session_state.get("unit_sel", all_units)
     chosen_units = st.multiselect("Tillatte enheter", all_units, default=default_units, key="unit_sel")
-    st.session_state.unit_sel = chosen_units or all_units
+    units_sel = chosen_units or all_units  # fall-back hvis bruker tømmer alt
 
     st.session_state.difficulty = st.selectbox("Talltype", ["Hele tall","Desimaltall","Blandet"], index=2, key="diff_sel")
 
@@ -160,11 +155,16 @@ for key, default in [
 # If category changed outside reset, still accept
 st.session_state.category = st.session_state.get("category", category)
 
+# Hent valgt enhetssett trygt
+current_units = st.session_state.get("unit_sel", UNITS[st.session_state.category])
+if not current_units:
+    current_units = UNITS[st.session_state.category]
+
 # Process queued new task BEFORE UI
 if st.session_state.spawn_new_task:
     text, correct = build_conversion_task(
         st.session_state.category,
-        st.session_state.unit_sel,
+        current_units,
         st.session_state.difficulty
     )
     st.session_state.task_text = text
@@ -177,7 +177,7 @@ if st.session_state.spawn_new_task:
 if st.session_state.task_text is None:
     text, correct = build_conversion_task(
         category,
-        st.session_state.get("unit_sel", UNITS[category]),
+        current_units,
         st.session_state.difficulty
     )
     st.session_state.task_text = text
@@ -275,7 +275,22 @@ else:
 
 # Focus back to input
 if st.session_state.get("focus_answer", False):
-    focus_answer_input()
+    components.html(
+        """
+        <script>
+        const tryFocus = () => {
+          const appRoot = window.parent.document.querySelector('section.main');
+          if (!appRoot) return;
+          const inputs = appRoot.querySelectorAll('input[type="text"]');
+          if (inputs.length > 0) {
+            inputs[0].focus();
+            inputs[0].select && inputs[0].select();
+          }
+        };
+        setTimeout(tryFocus, 50);
+        </script>
+        """, height=0
+    )
     st.session_state["focus_answer"] = False
 
 st.caption("Skriv svaret i riktig enhet. Desimaltall kan skrives med komma eller punktum.")
