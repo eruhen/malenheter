@@ -1,9 +1,7 @@
 
 # Målenheter – Streamlit øving (lengde/masse/volum)
-# Endringer i denne versjonen:
-# - FIKS: "Sjekk svar"-knappen ignorerer ikke lenger første forsøk etter ny oppgave
-#   (egen knapp-handler som overstyrer ignore_change)
-# - Beholder tidligere fiks: korrekt konverteringsretning og fasit som tall
+# Stabil Enter (form-submit), riktig konverteringsretning, fasit som tall,
+# og robust bytte av kategori/enheter. Standard: kun Lengde aktiv.
 # Kjør: streamlit run malenheter_trening.py
 
 import random
@@ -31,8 +29,8 @@ def pow10(exp: int) -> Decimal:
 
 # ---------- Domain ----------
 UNITS = {
-    "Lengde": ["mm","cm","dm","m","km"],
-    "Masse":  ["mg","g","hg","kg","tonn"],
+    "Lengde": ["mm","cm","dm","m","km"],          # dam, hm fjernet
+    "Masse":  ["mg","g","hg","kg","tonn"],        # hg lagt til
     "Volum":  ["ml","cl","dl","l"]
 }
 
@@ -53,7 +51,7 @@ def random_value(difficulty: str) -> Decimal:
         if random.random() < 0.2:
             n = Decimal(f"0.{str(random.randint(1,999)).zfill(random.choice([1,2,3]))}")
         return n
-    else:
+    else:  # Blandet
         return random_value("Hele tall") if random.random() < 0.5 else random_value("Desimaltall")
 
 def build_conversion_task(category: str, allowed_units, difficulty: str):
@@ -80,7 +78,6 @@ def reset_session():
     st.session_state.finished = False
     st.session_state.last_feedback = None
     st.session_state.focus_answer = True
-    st.session_state.ignore_change = False
     mode = st.session_state.get("mode", "Antall oppgaver")
     if mode == "Antall oppgaver":
         st.session_state.remaining = st.session_state.get("qcount", 20)
@@ -155,7 +152,7 @@ for key, default in [
     ("from_unit", None), ("to_unit", None), ("start_value", None),
     ("finished", False), ("correct_count", 0), ("tried", 0),
     ("last_feedback", None), ("focus_answer", False),
-    ("spawn_new_task", False), ("ignore_change", False)
+    ("spawn_new_task", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -172,8 +169,7 @@ if st.session_state.spawn_new_task:
     st.session_state.from_unit = u_from
     st.session_state.to_unit = u_to
     st.session_state.start_value = v
-    st.session_state['ignore_change'] = True  # suppress first on_change after clearing
-    st.session_state.answer = ""
+    st.session_state.answer = ""  # clear field for next question
     st.session_state.spawn_new_task = False
     st.session_state.focus_answer = True
 
@@ -242,8 +238,12 @@ else:
         unsafe_allow_html=True
     )
 
-    # --- Shared evaluation logic (no ignore guard here) ---
-    def _evaluate_current_answer():
+    # --- Form for reliable Enter submit ---
+    with st.form("answer_form", clear_on_submit=False):
+        st.text_input("Svar (skriv bare tallet):", key="answer")
+        submitted = st.form_submit_button("Sjekk svar", use_container_width=True)
+
+    def evaluate_current_answer():
         s = st.session_state.get('answer', '')
         try:
             u = parse_user(s)
@@ -265,26 +265,12 @@ else:
             st.session_state.last_feedback = "wrong"
             st.session_state.focus_answer = True
 
-    # on_change handler for the input (with ignore guard)
-    def on_answer_change():
-        if st.session_state.get('ignore_change', False):
-            st.session_state['ignore_change'] = False
-            return
-        _evaluate_current_answer()
+    if submitted:
+        evaluate_current_answer()
 
-    st.text_input("Svar (skriv bare tallet):", key="answer", on_change=on_answer_change)
-
-    colA, colB = st.columns([1,1])
-    with colA:
-        # Button handler must bypass ignore guard to avoid "no-op" etter ny oppgave
-        def on_check_button():
-            st.session_state['ignore_change'] = False
-            _evaluate_current_answer()
-        if st.button("Sjekk svar", type="primary", use_container_width=True, key="check_btn"):
-            on_check_button()
-    with colB:
-        if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
-            queue_new_task()
+    # Optional "Ny oppgave"-knapp
+    if st.button("Ny oppgave", use_container_width=True, key="new_task_btn"):
+        queue_new_task()
 
 # Focus back to input
 if st.session_state.get("focus_answer", False):
