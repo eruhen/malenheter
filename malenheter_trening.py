@@ -1,5 +1,9 @@
 
-# Måleenheter – Streamlit øving (lengde/masse/volum) — FIX: unngå å sette widget-key i samme kjøring
+# Målenheter – Streamlit øving (lengde/masse/volum)
+# Endringer:
+# - Kun Lengde aktiv som standard
+# - Fjernet dekameter (dam) og hektometer (hm)
+# - Lagt til hektogram (hg) i Masse
 # Kjør: streamlit run malenheter_trening.py
 import random
 from datetime import datetime, timedelta
@@ -31,14 +35,14 @@ def pow10(exp: int) -> Decimal:
 
 # ---------------- Domain ----------------
 UNITS = {
-    "Lengde": ["mm","cm","dm","m","dam","hm","km"],
-    "Masse":  ["mg","g","kg","tonn"],
+    "Lengde": ["mm","cm","dm","m","km"],   # fjernet dam, hm
+    "Masse":  ["mg","g","hg","kg","tonn"],# la til hg
     "Volum":  ["ml","cl","dl","l"]
 }
 
 EXPONENTS = {
-    "Lengde": {"mm": -3, "cm": -2, "dm": -1, "m": 0, "dam": 1, "hm": 2, "km": 3},
-    "Masse":  {"mg": -3, "g": 0, "kg": 3, "tonn": 6},
+    "Lengde": {"mm": -3, "cm": -2, "dm": -1, "m": 0, "km": 3},
+    "Masse":  {"mg": -3, "g": 0, "hg": 2, "kg": 3, "tonn": 6},  # hg = 10^2 g
     "Volum":  {"ml": -3, "cl": -2, "dl": -1, "l": 0},
 }
 
@@ -115,16 +119,30 @@ def focus_answer_input():
 st.set_page_config(page_title="Målenheter – trening", page_icon="📏")
 st.title("Trening på målenheter (SI)")
 
+# Standard: kun Lengde aktiv i starten
+DEFAULT_CATEGORY = "Lengde"
+
 with st.sidebar:
     st.header("Innstillinger")
     st.session_state.mode = st.selectbox("Øktmodus", ["Antall oppgaver", "Tid"], index=0)
-    category = st.selectbox("Kategori", list(UNITS.keys()), index=0)
 
-    # Unit filters per category (IKKE sett st.session_state['unit_sel'] eksplisitt her)
+    # Sett standard kategori første gang
+    if "category" not in st.session_state:
+        st.session_state.category = DEFAULT_CATEGORY
+    category = st.selectbox("Kategori", list(UNITS.keys()),
+                            index=list(UNITS.keys()).index(st.session_state.category))
+    st.session_state.category = category
+
+    # Unit filters per category (for Lengde som standard første gang)
     all_units = UNITS[category]
-    default_units = st.session_state.get("unit_sel", all_units)
-    chosen_units = st.multiselect("Tillatte enheter", all_units, default=default_units, key="unit_sel")
-    units_sel = chosen_units or all_units  # fall-back hvis bruker tømmer alt
+    if "unit_sel" not in st.session_state or st.session_state.category == DEFAULT_CATEGORY and not st.session_state.get("unit_sel"):
+        default_units = UNITS[DEFAULT_CATEGORY]
+    else:
+        default_units = st.session_state.get("unit_sel", all_units)
+
+    # Viktig: skriv ikke til session_state manuelt – bruk key
+    st.multiselect("Tillatte enheter", all_units, default=default_units, key="unit_sel")
+    current_units = st.session_state.get("unit_sel", all_units) or all_units
 
     st.session_state.difficulty = st.selectbox("Talltype", ["Hele tall","Desimaltall","Blandet"], index=2, key="diff_sel")
 
@@ -138,7 +156,6 @@ with st.sidebar:
             st.session_state.end_time = (datetime.utcnow() + timedelta(minutes=minutes)).timestamp()
 
     if st.button("Start/Nullstill økt", key="reset_btn"):
-        st.session_state.category = category
         reset_session()
 
 # Init defaults
@@ -146,19 +163,10 @@ for key, default in [
     ("task_text", None), ("correct", Decimal(0)), ("answer", ""),
     ("finished", False), ("correct_count", 0), ("tried", 0),
     ("last_feedback", None), ("focus_answer", False),
-    ("spawn_new_task", False), ("ignore_change", False),
-    ("category", "Lengde")
+    ("spawn_new_task", False), ("ignore_change", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
-
-# If category changed outside reset, still accept
-st.session_state.category = st.session_state.get("category", category)
-
-# Hent valgt enhetssett trygt
-current_units = st.session_state.get("unit_sel", UNITS[st.session_state.category])
-if not current_units:
-    current_units = UNITS[st.session_state.category]
 
 # Process queued new task BEFORE UI
 if st.session_state.spawn_new_task:
@@ -176,7 +184,7 @@ if st.session_state.spawn_new_task:
 
 if st.session_state.task_text is None:
     text, correct = build_conversion_task(
-        category,
+        st.session_state.category,
         current_units,
         st.session_state.difficulty
     )
