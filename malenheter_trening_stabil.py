@@ -1,16 +1,14 @@
 
-# Målenheter – Streamlit øving (STABIL m/ umiddelbar feedback)
-# Endringer:
-# - Behandler innsending FØR vi viser tilbakemelding/oppgave
-#   => Første Enter/klikk gir umiddelbar feedback i samme kjøring
-# - Viser tydelig grønn/gul/rød melding med en gang
-# - Beholder: kun lengde, 10 oppgaver, form-per-oppgave, riktig konvertering
+# Målenheter – Streamlit øving (STABIL + autofokus på nytt svarfelt)
+# Endring nå:
+# - Når ny oppgave vises, flyttes skrivemarkøren automatisk til svarfeltet og teksten markeres.
 #
 # Kjør: streamlit run malenheter_trening_stabil.py
 
 import random
 from decimal import Decimal, getcontext
 import streamlit as st
+import streamlit.components.v1 as components
 
 getcontext().prec = 28
 
@@ -69,6 +67,7 @@ defaults = {
     "correct": Decimal(0),
     "last_feedback": None,   # "correct" | "wrong" | "parse_error"
     "last_answer": None,     # sist innsendte råtekst
+    "need_focus": True,      # styrer autofokus på inputfelt
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -79,12 +78,14 @@ def new_task():
     st.session_state["correct"], st.session_state["task_text"] = make_task()
     st.session_state["last_feedback"] = None
     st.session_state["last_answer"] = None
+    st.session_state["need_focus"] = True  # be om fokus på neste render
 
 def reset_session():
     st.session_state.update({
         "qid": 0, "total": 10, "remaining": 10,
         "tried": 0, "correct_count": 0,
         "finished": False, "last_feedback": None, "last_answer": None,
+        "need_focus": True,
     })
     new_task()
 
@@ -124,26 +125,22 @@ else:
         st.text_input("Svar (skriv bare tallet):", key=answer_key)
         submitted = st.form_submit_button("Sjekk svar", use_container_width=True)
 
-    # Lokale variabler for umiddelbar feedback i denne kjøringen
-    show_feedback_now = None  # "correct" | "wrong" | "parse_error"
+    # Umiddelbar feedback i denne kjøringen
+    show_feedback_now = None
     correct_value_now = st.session_state["correct"]
-    last_answer_now = None
 
     if submitted:
         raw = st.session_state.get(answer_key, "")
-        last_answer_now = raw
         try:
             u = parse_user(raw)
         except Exception:
             st.session_state["last_feedback"] = "parse_error"
-            st.session_state["last_answer"] = raw
             show_feedback_now = "parse_error"
         else:
             st.session_state["tried"] += 1
             if u == st.session_state["correct"]:
                 st.session_state["correct_count"] += 1
                 st.session_state["last_feedback"] = "correct"
-                st.session_state["last_answer"] = raw
                 show_feedback_now = "correct"
                 st.session_state["remaining"] = max(0, st.session_state["remaining"] - 1)
                 if st.session_state["remaining"] == 0:
@@ -152,7 +149,6 @@ else:
                     new_task()
             else:
                 st.session_state["last_feedback"] = "wrong"
-                st.session_state["last_answer"] = raw
                 show_feedback_now = "wrong"
 
     # --- VIS FEEDBACK I SAMME KJØRING ---
@@ -163,6 +159,38 @@ else:
         st.error(f"Feil. Riktig svar er **{fmt(correct_value_now)}**.")
     elif fb == "parse_error":
         st.warning("Kunne ikke tolke tallet. Bruk komma eller punktum.")
+
+    # Autofokus på inputfeltet for AKTIV oppgave
+    if st.session_state.get("need_focus", False):
+        # Forsøk å finne siste input via label-tekst, og fokusere + select()
+        components.html(
+            """
+            <script>
+            const tryFocus = () => {
+              const root = window.parent.document;
+              const labels = [...root.querySelectorAll('label')];
+              const lab = labels.reverse().find(l => l.textContent.trim().startsWith('Svar (skriv bare tallet)'));
+              let input = null;
+              if (lab) {
+                input = lab.parentElement.querySelector('input[type="text"]');
+              }
+              if (!input) {
+                input = root.querySelector('input[type="text"]');
+              }
+              if (input) {
+                input.focus();
+                if (input.select) { input.select(); }
+              } else {
+                setTimeout(tryFocus, 120);
+              }
+            };
+            setTimeout(tryFocus, 80);
+            </script>
+            """,
+            height=0,
+        )
+        # Slå av ønsket fokus til neste gang vi eksplisitt ber om det (ved ny oppgave/reset)
+        st.session_state["need_focus"] = False
 
     # «Ny oppgave»-knapp (frivillig hopp over)
     if st.button("Ny oppgave", use_container_width=True):
