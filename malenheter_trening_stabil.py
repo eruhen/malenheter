@@ -1,7 +1,9 @@
 
-# Målenheter – Streamlit øving (STABIL + autofokus på nytt svarfelt)
-# Endring nå:
-# - Når ny oppgave vises, flyttes skrivemarkøren automatisk til svarfeltet og teksten markeres.
+# Målenheter – Streamlit øving (STABIL + robust autofokus via MutationObserver)
+# Nytt:
+# - Robust autofokus på svarfeltet ved ny oppgave med MutationObserver.
+#   Søker etter siste input[type="text"] i app-root og fokuserer/markerer.
+# - Ingen avhengighet til label-tekst eller parent-hacking som kan feile.
 #
 # Kjør: streamlit run malenheter_trening_stabil.py
 
@@ -160,36 +162,44 @@ else:
     elif fb == "parse_error":
         st.warning("Kunne ikke tolke tallet. Bruk komma eller punktum.")
 
-    # Autofokus på inputfeltet for AKTIV oppgave
+    # **Robust autofokus**
     if st.session_state.get("need_focus", False):
-        # Forsøk å finne siste input via label-tekst, og fokusere + select()
         components.html(
             """
             <script>
-            const tryFocus = () => {
-              const root = window.parent.document;
-              const labels = [...root.querySelectorAll('label')];
-              const lab = labels.reverse().find(l => l.textContent.trim().startsWith('Svar (skriv bare tallet)'));
-              let input = null;
-              if (lab) {
-                input = lab.parentElement.querySelector('input[type="text"]');
+            (function(){
+              const root = window.parent?.document || document;
+
+              function focusLastTextInput() {
+                const inputs = root.querySelectorAll('input[type="text"]');
+                if (inputs.length) {
+                  const el = inputs[inputs.length - 1];
+                  el.focus();
+                  if (el.select) el.select();
+                  return true;
+                }
+                return false;
               }
-              if (!input) {
-                input = root.querySelector('input[type="text"]');
+
+              if (!focusLastTextInput()) {
+                const obs = new MutationObserver(() => {
+                  if (focusLastTextInput()) {
+                    obs.disconnect();
+                  }
+                });
+                const appRoot = root.querySelector('section.main') || root.body;
+                if (appRoot) {
+                  obs.observe(appRoot, { childList: true, subtree: true });
+                } else {
+                  // fallback: prøv igjen etter litt
+                  setTimeout(focusLastTextInput, 120);
+                }
               }
-              if (input) {
-                input.focus();
-                if (input.select) { input.select(); }
-              } else {
-                setTimeout(tryFocus, 120);
-              }
-            };
-            setTimeout(tryFocus, 80);
+            })();
             </script>
             """,
             height=0,
         )
-        # Slå av ønsket fokus til neste gang vi eksplisitt ber om det (ved ny oppgave/reset)
         st.session_state["need_focus"] = False
 
     # «Ny oppgave»-knapp (frivillig hopp over)
